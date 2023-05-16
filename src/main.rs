@@ -1,18 +1,25 @@
-use std::{net::TcpListener, thread};
-
 mod forward;
+mod monitor;
 mod proxy;
 mod utils;
 
+use std::{sync::Arc, sync::Mutex};
+
+use forward::Listener;
+use monitor::Monitor;
+
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:443").unwrap();
-    println!("start..");
-    for stream in listener.incoming() {
-        if let Ok(local_stream) = stream {
-            println!("new request!!!!!!");
-            thread::spawn(|| {
-                forward::handle_https_request(local_stream);
-            });
-        }
-    }
+    let mut monitor = Monitor::new();
+
+    let global_id = Arc::new(Mutex::new(0));
+
+    let mut https_listener = Listener::new(443, Arc::clone(&global_id));
+    https_listener.set_monitor_sender(monitor.sender.clone());
+    https_listener.start();
+
+    let mut http_listener = Listener::new(80, Arc::clone(&global_id));
+    http_listener.set_monitor_sender(monitor.sender.clone());
+    http_listener.start();
+
+    monitor.start();
 }

@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 pub fn get_server_name_from_hello_client_message(msg: &[u8]) -> Result<String, &str> {
     let session_id_length = (&msg[43..44])[0] as usize;
 
@@ -17,7 +19,6 @@ pub fn get_server_name_from_hello_client_message(msg: &[u8]) -> Result<String, &
     let extensions = &msg[extensions_start..extensions_start + extensions_length];
 
     let mut i: usize = 0;
-    let mut server_name_result = String::from("");
 
     while i < extensions_length {
         let extension_type = &extensions[i..i + 2];
@@ -33,10 +34,27 @@ pub fn get_server_name_from_hello_client_message(msg: &[u8]) -> Result<String, &
         let server_name_length =
             server_name_length[0] as usize * 256 + server_name_length[1] as usize;
         let server_name = &extensions[i + 9..i + 9 + server_name_length];
-        server_name_result = String::from_utf8(server_name.to_vec()).unwrap();
-
-        break;
+        let server_name_result = String::from_utf8(server_name.to_vec()).unwrap();
+        return Ok(server_name_result);
     }
+    Err("server name not found")
+}
 
-    Ok(server_name_result)
+pub fn get_server_name_from_http_request_message(msg: &[u8]) -> Result<String, &str> {
+    let message = String::from_utf8(msg.to_vec()).unwrap();
+    for line in message.lines() {
+        if line.to_lowercase().starts_with("host:") {
+            let server_name_result: Vec<&str> = line.trim().split(':').collect();
+            let server_name_result = server_name_result[1].trim();
+            return Ok(String::from(server_name_result));
+        }
+    }
+    Err("server name not found")
+}
+
+pub fn get_timestamp() -> u64 {
+    let duration = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    duration.as_secs()
 }

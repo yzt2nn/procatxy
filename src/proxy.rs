@@ -4,6 +4,11 @@ use std::{
     time::Duration,
 };
 
+#[derive(Clone)]
+pub enum ProxyConfig {
+    Socks5 { ip: String, port: u32 },
+}
+
 pub struct Socks5 {}
 
 impl Socks5 {

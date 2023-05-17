@@ -1,4 +1,8 @@
-use crate::{monitor::MonitorAction, proxy, utils};
+use crate::{
+    monitor::MonitorAction,
+    proxy::{self, ProxyConfig},
+    utils,
+};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -11,14 +15,16 @@ pub struct Listener {
     port: u32,
     global_id: Arc<Mutex<u32>>,
     monitor_sender: Option<Sender<MonitorAction>>,
+    proxy_config: ProxyConfig,
 }
 
 impl Listener {
-    pub fn new(port: u32, global_id: Arc<Mutex<u32>>) -> Self {
+    pub fn new(port: u32, proxy_config: ProxyConfig, global_id: Arc<Mutex<u32>>) -> Self {
         Self {
             port,
             monitor_sender: None,
             global_id,
+            proxy_config,
         }
     }
 
@@ -30,6 +36,8 @@ impl Listener {
         let port: u32 = self.port;
         let sender = self.monitor_sender.clone();
         let global_id = Arc::clone(&self.global_id);
+        let proxy_config = self.proxy_config.clone();
+
         thread::spawn(move || {
             let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).unwrap();
             for stream in listener.incoming() {
@@ -38,8 +46,9 @@ impl Listener {
                     *id += 1;
                     let current_id = *id;
                     let sender = sender.clone();
+                    let proxy_config = proxy_config.clone();
                     thread::spawn(move || {
-                        handle_conn(current_id, client_stream, port, sender);
+                        handle_conn(current_id, client_stream, port, proxy_config, sender);
                     });
                 }
             }
@@ -57,6 +66,7 @@ fn handle_conn(
     id: u32,
     mut client_stream: TcpStream,
     server_port: u32,
+    proxy_config: ProxyConfig,
     monitor_sender: Option<Sender<MonitorAction>>,
 ) {
     send_to_monitor(
@@ -80,19 +90,21 @@ fn handle_conn(
         utils::get_server_name_from_http_request_message(&msg).unwrap()
     };
 
-    // 获取server name后，开始连接Socks5
-    let mut proxy_stream =
-        proxy::Socks5::connect("192.168.198.139", 9909, &server_name, server_port).unwrap_or_else(
-            |_| {
-                // 失败则发送0心跳包，告知监视器可以移除
-                send_to_monitor(
-                    &monitor_sender,
-                    MonitorAction::Heartbeat { id, timestamp: 0 },
-                );
-                panic!("connect proxy failed")
-            },
+    // 获取server name后，开始连接proxy
+    let proxy_stream;
+    match proxy_config {
+        ProxyConfig::Socks5 { ip, port } => {
+            proxy_stream = proxy::Socks5::connect(&ip, port, &server_name, server_port)
+        }
+    }
+    let mut proxy_stream = proxy_stream.unwrap_or_else(|_| {
+        // 失败则发送0心跳包，告知监视器可以移除
+        send_to_monitor(
+            &monitor_sender,
+            MonitorAction::Heartbeat { id, timestamp: 0 },
         );
-
+        panic!("connect proxy failed")
+    });
     send_to_monitor(&monitor_sender, MonitorAction::ProxyOk { id, server_name });
 
     client_stream

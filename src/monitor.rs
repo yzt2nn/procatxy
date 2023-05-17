@@ -16,7 +16,6 @@ struct Connection {
     last_timestamp: u64,
 }
 
-#[derive(Debug)]
 pub enum MonitorAction {
     ConnInit { id: u32, port: u32 },          // 监听到请求时
     ProxyOk { id: u32, server_name: String }, // 代理连接成功时
@@ -29,6 +28,8 @@ pub struct Monitor {
     conn_list: Vec<Connection>,
     pub sender: Sender<MonitorAction>,
     receiver: Receiver<MonitorAction>,
+    total_forward_traffic: f64, // 总计转发流量(KB)
+    total_receive_traffic: f64, // 总计接收流量(KB)
 }
 
 impl Monitor {
@@ -38,6 +39,8 @@ impl Monitor {
             conn_list: Vec::<Connection>::new(),
             sender,
             receiver,
+            total_forward_traffic: 0.0,
+            total_receive_traffic: 0.0,
         }
     }
 
@@ -62,8 +65,10 @@ impl Monitor {
         let now = utils::get_timestamp();
 
         println!(
-            "waiting request... | current connection count: {} | now timestamp: {}\n",
+            "| waiting request... | current connection count: {0} | total: ↑{1:.3} MB, ↓{2:.3} MB | now timestamp: {3} |\n",
             self.conn_list.len(),
+            self.total_forward_traffic / 1000.0,
+            self.total_receive_traffic / 1000.0,
             now
         );
 
@@ -147,12 +152,14 @@ impl Monitor {
                         if let Ok(conn) = self.find_conn_by_id(id) {
                             conn.total_forward_traffic += length;
                         }
+                        self.total_forward_traffic += length;
                         continue;
                     }
                     MonitorAction::ReceiveTraffic { id, length } => {
                         if let Ok(conn) = self.find_conn_by_id(id) {
                             conn.total_receive_traffic += length;
                         }
+                        self.total_receive_traffic += length;
                         continue;
                     }
                     MonitorAction::Heartbeat { id, timestamp } => {
